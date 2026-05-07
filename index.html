@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel Campaign Analytics | POC Performance Dashboard</title>
+    <!-- Bootstrap 5 + Icons + jquery -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- SheetJS (XLSX) core library -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+    <!-- Chart.js for dashboard visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        body { background: #f4f7fc; font-family: 'Segoe UI', Roboto, sans-serif; }
+        .card-shadow { box-shadow: 0 8px 20px rgba(0,0,0,0.05); border-radius: 1rem; border: none; }
+        .navbar-brand { font-weight: 700; letter-spacing: -0.3px; }
+        .upload-area { border: 2px dashed #cbd5e1; background: #fefefe; transition: 0.2s; border-radius: 1rem; cursor: pointer; }
+        .upload-area:hover { border-color: #3b82f6; background: #f0f9ff; }
+        .filter-card { background: white; border-radius: 1rem; padding: 1rem; margin-bottom: 1rem; }
+        .table-preview { max-height: 280px; overflow-y: auto; font-size: 0.85rem; }
+        .badge-poc { background: #eef2ff; color: #1e3a8a; }
+        .btn-export { background: #0f3b2c; color: white; transition: 0.2s; }
+        .btn-export:hover { background: #1e5a3e; color: white; }
+        .dashboard-table { font-size: 0.75rem; }
+        .dashboard-table th { background: #e9ecef; position: sticky; top:0; z-index: 1; }
+        .poc-sheet-tab { cursor: pointer; background: #f1f5f9; margin-right: 5px; border-radius: 30px; padding: 4px 16px; display: inline-block; }
+        .poc-sheet-tab.active { background: #2c3e66; color: white; }
+        hr { opacity: 0.5; }
+        .summary-box { background: #f8fafc; border-radius: 1rem; padding: 0.8rem; border-left: 4px solid #3b82f6; }
+    </style>
+</head>
+<body>
+
+<div class="container-fluid px-4 py-3">
+    <!-- Header -->
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fw-bold"><i class="fas fa-chart-line text-primary me-2"></i>Influencer Analytics Hub</h2>
+            <p class="text-muted">Upload Excel → Auto grouping | Duplicate resolution by earliest timestamp | Per-POC export</p>
+        </div>
+        <div>
+            <button id="exportFinalBtn" class="btn btn-success btn-lg shadow-sm" disabled><i class="fas fa-file-excel me-2"></i>Export Master Excel Report</button>
+        </div>
+    </div>
+
+    <!-- Upload Card -->
+    <div class="card card-shadow mb-4">
+        <div class="card-body">
+            <div class="row align-items-center">
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold"><i class="fas fa-cloud-upload-alt me-1"></i> Upload Form Responses (.xlsx, .xls)</label>
+                    <input type="file" id="excelInput" accept=".xlsx, .xls, .csv" class="form-control">
+                    <div class="form-text">Supports columns: Timestamp, Full Name, Email, POC Name, Followers, Profile Category, etc. (case‑insensitive)</div>
+                </div>
+                <div class="col-md-6 text-md-end mt-3 mt-md-0">
+                    <span class="badge bg-info text-dark px-3 py-2"><i class="fas fa-lightbulb"></i> Duplicate logic: earliest Timestamp = PRIMARY per email, cross-POC assigned to first POC</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filters + Preview -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-12">
+            <div class="card card-shadow">
+                <div class="card-header bg-white fw-bold"><i class="fas fa-filter"></i> Data Preview & Filters</div>
+                <div class="card-body">
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-3">
+                            <label>Filter by POC</label>
+                            <select id="filterPoc" class="form-select form-select-sm"></select>
+                        </div>
+                        <div class="col-md-2">
+                            <label>Min Followers</label>
+                            <input type="number" id="filterMinFollowers" class="form-control form-control-sm" placeholder="0">
+                        </div>
+                        <div class="col-md-2">
+                            <label>Max Followers</label>
+                            <input type="number" id="filterMaxFollowers" class="form-control form-control-sm" placeholder="Any">
+                        </div>
+                        <div class="col-md-3">
+                            <label>Category (contains)</label>
+                            <input type="text" id="filterCategory" class="form-control form-control-sm" placeholder="Lifestyle, Beauty..">
+                        </div>
+                        <div class="col-md-2">
+                            <label>City</label>
+                            <input type="text" id="filterCity" class="form-control form-control-sm" placeholder="City">
+                        </div>
+                    </div>
+                    <div class="table-preview">
+                        <table class="table table-sm table-bordered table-hover" id="previewTable">
+                            <thead class="table-light"><tr><th>#</th><th>Full Name</th><th>Email</th><th>POC</th><th>Followers</th><th>Category</th><th>Timestamp</th><th>Status</th></tr></thead>
+                            <tbody><tr><td colspan="8" class="text-center text-muted">No data loaded. Upload Excel file.</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dashboard Chart + Summary -->
+    <div class="row g-4 mb-4">
+        <div class="col-md-5">
+            <div class="card card-shadow h-100">
+                <div class="card-header bg-white fw-bold">Top POC by Primary Count</div>
+                <div class="card-body"><canvas id="pocChart" width="400" height="300" style="max-height: 280px;"></canvas></div>
+            </div>
+        </div>
+        <div class="col-md-7">
+            <div class="card card-shadow h-100">
+                <div class="card-header bg-white fw-bold">Dashboard (POC summary table)</div>
+                <div class="card-body p-0 overflow-auto" style="max-height: 350px;">
+                    <table class="table table-sm table-striped dashboard-table mb-0" id="dashboardTable">
+                        <thead><tr><th>POC Name</th><th>Total</th><th>Duplicates</th><th>Primary</th><th>1K–10K</th><th>10K–50K</th><th>50K–100K</th><th>100K–500K</th><th>500K+</th><th>1M+</th><th>Others</th></tr></thead>
+                        <tbody><tr><td colspan="11" class="text-center">—</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Per-POC dynamic sheet tabs (preview individual sheets) -->
+    <div class="card card-shadow">
+        <div class="card-header bg-white fw-bold d-flex justify-content-between">
+            <span><i class="fas fa-users"></i> Individual POC Reports (click to view)</span>
+            <span class="text-muted small">Each sheet includes breakdown & duplicates group</span>
+        </div>
+        <div class="card-body">
+            <div id="pocTabsContainer" class="mb-3 d-flex flex-wrap gap-1"></div>
+            <div id="pocDetailPanel" style="max-height: 500px; overflow-y: auto;">
+                <p class="text-muted text-center">Select a POC above to view detailed records & summary.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ---------- Global state ----------
+let rawData = [];           // array of normalized objects
+let pocGroups = new Map();  // key: POC Name -> { entries: [], primaryCount, duplicateCount, bucketCounts }
+let crossPocPrimaryMap = new Map(); // email -> { firstTimestamp, assignedPOC }
+let processedEntries = []; // final enriched entries with flags: isDuplicate, dupGroup, primaryFlag, assignedPOC
+
+// Helper functions: normalize columns (case-insensitive)
+const colMapping = (headers) => {
+    const map = {};
+    const lowerHeaders = headers.map(h => String(h).trim().toLowerCase());
+    const expected = {
+        timestamp: ['timestamp', 'date', 'submission date'],
+        fullname: ['full name', 'name', 'fullname'],
+        email: ['email', 'email id', 'email address'],
+        pocname: ['poc name', 'name of your point of contact (poc) who shared this form with you', 'point of contact', 'poc'],
+        poccontact: ['contact number of your point of contact (poc)', 'poc contact', 'contact number'],
+        followers: ['exact number of followers', 'followers', 'follower count'],
+        profilecategory: ['select your profile category', 'profile category', 'category'],
+        contentcategory: ['category of content you create', 'content category'],
+        city: ['city'],
+        age: ['age'],
+        gender: ['gender', 'select your gender.'],
+        instagram: ['instagram handle'],
+        source: ['how did you hear about this campaign/event?', 'source']
+    };
+    for (let [key, patterns] of Object.entries(expected)) {
+        const idx = lowerHeaders.findIndex(h => patterns.some(p => h.includes(p)));
+        if (idx !== -1) map[key] = idx;
+    }
+    return map;
+};
+
+function normalizeRow(row, colIdx) {
+    const getVal = (field) => (colIdx[field] !== undefined ? row[colIdx[field]] : '');
+    let timestampRaw = getVal('timestamp');
+    let ts = new Date(timestampRaw);
+    if (isNaN(ts.getTime())) ts = new Date(); // fallback but preserve order minimal
+    const emailRaw = String(getVal('email') || '').trim().toLowerCase();
+    const pocRaw = String(getVal('pocname') || '').trim().toUpperCase();
+    const followersRaw = getVal('followers');
+    let followersNum = parseFloat(String(followersRaw).replace(/,/g, ''));
+    if (isNaN(followersNum)) followersNum = 0;
+    const profileCatRaw = String(getVal('profilecategory') || '').trim();
+    return {
+        timestamp: ts,
+        timestampRaw: timestampRaw,
+        fullName: String(getVal('fullname') || ''),
+        age: getVal('age'),
+        gender: String(getVal('gender') || ''),
+        instagram: String(getVal('instagram') || ''),
+        email: emailRaw,
+        city: String(getVal('city') || ''),
+        followers: followersNum,
+        profileCategory: profileCatRaw,
+        contentCategory: String(getVal('contentcategory') || ''),
+        pocName: pocRaw,
+        pocContact: String(getVal('poccontact') || ''),
+        source: String(getVal('source') || ''),
+        originalRow: row
+    };
+}
+
+// bucket logic: returns bucket key
+function getFollowerBucket(followers) {
+    if (followers >= 1000 && followers < 10000) return '1K–10K';
+    if (followers >= 10000 && followers < 50000) return '10K–50K';
+    if (followers >= 50000 && followers < 100000) return '50K–100K';
+    if (followers >= 100000 && followers < 500000) return '100K–500K';
+    if (followers >= 500000 && followers < 1000000) return '500K+';
+    if (followers >= 1000000) return '1M+';
+    if (followers > 0 && followers < 1000) return 'Below 1K';
+    return 'Other';
+}
+
+// main processing pipeline
+function processData(allRowsNormalized) {
+    // Step1: Determine earliest submission per email (cross-POC primary assignment)
+    const emailFirstMap = new Map(); // email -> { ts, poc }
+    for (let entry of allRowsNormalized) {
+        if (!entry.email) continue;
+        const existing = emailFirstMap.get(entry.email);
+        if (!existing || entry.timestamp < existing.ts) {
+            emailFirstMap.set(entry.email, { ts: entry.timestamp, poc: entry.pocName });
+        }
+    }
+    // Step2: enrich each entry with duplicate flag & primary assignment relative to its POC
+    const enriched = [];
+    const dupGroupMap = new Map(); // email -> group index (just dup group id)
+    let groupCounter = 1;
+    for (let entry of allRowsNormalized) {
+        if (!entry.email) {
+            enriched.push({ ...entry, isDuplicate: false, dupGroup: '', primaryFlag: false, assignedPOC: entry.pocName });
+            continue;
+        }
+        const firstInfo = emailFirstMap.get(entry.email);
+        const isGlobalFirstPOC = (firstInfo.poc === entry.pocName);
+        // Determine if it's duplicate inside this POC? Actually we need per POC duplicate status: if it's not the first submission for this email overall?
+        // But rule: candidate belongs to POC where first submission occurred. For other POCs mark as duplicate.
+        let isDuplicate = false;
+        let primaryFlag = false;
+        let dupGroup = '';
+        if (firstInfo.poc === entry.pocName) {
+            // This is the candidate's primary POC. Now check if this exact submission is the earliest timestamp across all submissions (including multiple in same POC)
+            // find all submissions with same email, order by timestamp, mark earliest as primary in that POC
+            const submissionsForEmail = allRowsNormalized.filter(r => r.email === entry.email).sort((a,b)=>a.timestamp - b.timestamp);
+            const isEarliestOverall = submissionsForEmail[0] === entry;
+            if (isEarliestOverall) {
+                primaryFlag = true;
+                isDuplicate = false;
+            } else {
+                isDuplicate = true;
+                primaryFlag = false;
+            }
+            dupGroup = `GRP_${entry.email.substring(0,8)}`;
+        } else {
+            // candidate submitted under different POC than assigned -> completely duplicate & not primary
+            isDuplicate = true;
+            primaryFlag = false;
+            dupGroup = `GRP_${entry.email.substring(0,8)}`;
+        }
+        enriched.push({ ...entry, isDuplicate, dupGroup, primaryFlag, assignedPOC: firstInfo.poc });
+    }
+    
+    // Build POC Map
+    const pocMap = new Map(); // key: POC name (original from each row pocName, but use the normalized)
+    for (let e of enriched) {
+        const pocKey = e.pocName;
+        if (!pocMap.has(pocKey)) {
+            pocMap.set(pocKey, { entries: [], primaryCount:0, duplicateCount:0, bucketCounts: new Map() });
+        }
+        const group = pocMap.get(pocKey);
+        group.entries.push(e);
+        if (e.primaryFlag) group.primaryCount++;
+        if (e.isDuplicate) group.duplicateCount++;
+        const bucket = getFollowerBucket(e.followers);
+        group.bucketCounts.set(bucket, (group.bucketCounts.get(bucket)||0)+1);
+    }
+    // sort entries inside each POC by timestamp
+    for (let [_, val] of pocMap.entries()) {
+        val.entries.sort((a,b)=>a.timestamp - b.timestamp);
+    }
+    return { enriched, pocMap };
+}
+
+// Build dashboard array for output
+function buildDashboardArray(pocMap) {
+    const rows = [];
+    for (let [pocName, data] of pocMap.entries()) {
+        const total = data.entries.length;
+        const dup = data.duplicateCount;
+        const primary = data.primaryCount;
+        const buckets = data.bucketCounts;
+        const row = {
+            pocName,
+            total,
+            duplicates: dup,
+            primary,
+            '1K–10K': buckets.get('1K–10K') || 0,
+            '10K–50K': buckets.get('10K–50K') || 0,
+            '50K–100K': buckets.get('50K–100K') || 0,
+            '100K–500K': buckets.get('100K–500K') || 0,
+            '500K+': buckets.get('500K+') || 0,
+            '1M+': buckets.get('1M+') || 0,
+            'Below 1K': buckets.get('Below 1K') || 0,
+            'Other': buckets.get('Other') || 0,
+        };
+        rows.push(row);
+    }
+    rows.sort((a,b)=>b.primary - a.primary);
+    return rows;
+}
+
+// Render dashboard Table & Chart
+let chartInstance = null;
+function renderDashboard(pocMap) {
+    const dashRows = buildDashboardArray(pocMap);
+    const tbody = $('#dashboardTable tbody');
+    tbody.empty();
+    for (let r of dashRows) {
+        tbody.append(`<tr><td>${r.pocName}</td><td>${r.total}</td><td>${r.duplicates}</td><td>${r.primary}</td><td>${r['1K–10K']}</td><td>${r['10K–50K']}</td><td>${r['50K–100K']}</td><td>${r['100K–500K']}</td><td>${r['500K+']}</td><td>${r['1M+']}</td><td>${r['Other']+r['Below 1K']}</td></tr>`);
+    }
+    // chart: top 8 POC by primary
+    const topPoc = dashRows.slice(0,8);
+    const labels = topPoc.map(x=>x.pocName.length>15? x.pocName.slice(0,12)+'..':x.pocName);
+    const primaryCounts = topPoc.map(x=>x.primary);
+    if (chartInstance) chartInstance.destroy();
+    const ctx = document.getElementById('pocChart').getContext('2d');
+    chartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: { labels, datasets: [{ label: 'Primary Count', data: primaryCounts, backgroundColor: '#3b82f6' }] },
+        options: { responsive: true, maintainAspectRatio: true }
+    });
+}
+
+// Render preview table with filters
+let currentEnriched = [];
+function updatePreview(enriched) {
+    currentEnriched = enriched;
+    applyFiltersAndPreview();
+}
+function applyFiltersAndPreview() {
+    let filtered = [...currentEnriched];
+    const pocFilter = $('#filterPoc').val();
+    const minF = parseInt($('#filterMinFollowers').val()) || 0;
+    const maxF = $('#filterMaxFollowers').val() ? parseInt($('#filterMaxFollowers').val()) : Infinity;
+    const catFilter = $('#filterCategory').val().toLowerCase();
+    const cityFilter = $('#filterCity').val().toLowerCase();
+    if (pocFilter && pocFilter !== 'ALL') filtered = filtered.filter(e => e.pocName === pocFilter);
+    filtered = filtered.filter(e => e.followers >= minF && e.followers <= maxF);
+    if (catFilter) filtered = filtered.filter(e => e.profileCategory.toLowerCase().includes(catFilter) || e.contentCategory.toLowerCase().includes(catFilter));
+    if (cityFilter) filtered = filtered.filter(e => e.city.toLowerCase().includes(cityFilter));
+    const tbody = $('#previewTable tbody');
+    tbody.empty();
+    filtered.slice(0, 100).forEach((e, idx) => {
+        const statusBadge = e.primaryFlag ? '<span class="badge bg-success">⭐ PRIMARY</span>' : (e.isDuplicate ? '<span class="badge bg-secondary">DUPLICATE</span>' : '<span class="badge bg-info">Unique</span>');
+        tbody.append(`<tr><td>${idx+1}</td><td>${e.fullName}</td><td>${e.email}</td><td>${e.pocName}</td><td>${e.followers}</td><td>${e.profileCategory}</td><td>${e.timestampRaw || ''}</td><td>${statusBadge}</td></tr>`);
+    });
+    if(filtered.length===0) tbody.html('<tr><td colspan="8" class="text-center">No matching records</td></tr>');
+}
+function populatePocFilter(pocMap) {
+    const select = $('#filterPoc');
+    select.empty().append('<option value="ALL">All POCs</option>');
+    for (let poc of pocMap.keys()) select.append(`<option value="${poc}">${poc}</option>`);
+}
+
+// display individual POC sheets (HTML preview with summary)
+let currentPocMap = null;
+function renderPOCSheets(pocMap) {
+    currentPocMap = pocMap;
+    const container = $('#pocTabsContainer');
+    container.empty();
+    const pocNames = Array.from(pocMap.keys()).sort();
+    if(pocNames.length===0) return;
+    pocNames.forEach(poc => {
+        const btn = $(`<div class="poc-sheet-tab">${poc.length>20? poc.slice(0,18)+'..':poc}</div>`);
+        btn.on('click', () => {
+            $('.poc-sheet-tab').removeClass('active');
+            btn.addClass('active');
+            showPocDetail(poc, pocMap.get(poc));
+        });
+        container.append(btn);
+    });
+    if(pocNames.length) showPocDetail(pocNames[0], pocMap.get(pocNames[0]));
+}
+
+function showPocDetail(pocName, pocData) {
+    const entries = pocData.entries;
+    const summaryHtml = `
+        <div class="row mb-3 summary-box">
+            <div class="col-md-3"><strong>Total Entries:</strong> ${entries.length}</div>
+            <div class="col-md-3"><strong>Duplicate Count:</strong> ${pocData.duplicateCount}</div>
+            <div class="col-md-3"><strong>Primary Count:</strong> ${pocData.primaryCount}</div>
+            <div class="col-md-3"><strong>Avg Followers:</strong> ${Math.round(entries.reduce((a,b)=>a+b.followers,0)/entries.length || 0).toLocaleString()}</div>
+            <div class="col-md-3"><strong>Max Followers:</strong> ${Math.max(...entries.map(e=>e.followers),0).toLocaleString()}</div>
+            <div class="col-md-3"><strong>Min Followers:</strong> ${Math.min(...entries.map(e=>e.followers),0).toLocaleString()}</div>
+        </div>
+        <div class="mb-2"><strong>📊 Profile Category Breakdown</strong></div>
+        <div class="d-flex flex-wrap gap-2 mb-3">${Array.from(pocData.bucketCounts.entries()).map(([k,v])=>`<span class="badge bg-secondary">${k}: ${v}</span>`).join('') || '<span>—</span>'}</div>
+        <table class="table table-sm table-bordered table-hover" id="detailPocTable">
+            <thead><tr><th>SR</th><th>Full Name</th><th>Age</th><th>Gender</th><th>Instagram</th><th>Followers</th><th>Profile Category</th><th>Content</th><th>City</th><th>Email</th><th>POC</th><th>POC Contact</th><th>Source</th><th>Timestamp</th><th>Duplicate</th><th>Dup Group</th><th>Primary</th></tr></thead>
+            <tbody>${entries.map((e,idx)=>`<tr>
+                <td>${idx+1}</td><td>${e.fullName}</td><td>${e.age}</td><td>${e.gender}</td><td>${e.instagram}</td><td>${e.followers}</td><td>${e.profileCategory}</td><td>${e.contentCategory}</td><td>${e.city}</td><td>${e.email}</td><td>${e.pocName}</td><td>${e.pocContact}</td><td>${e.source}</td><td>${e.timestampRaw || ''}</td>
+                <td>${e.isDuplicate ? 'YES' : 'NO'}</td><td>${e.dupGroup || ''}</td><td>${e.primaryFlag ? 'PRIMARY ⭐' : ''}</td>
+            </tr>`).join('')}</tbody>
+        </table>
+    `;
+    $('#pocDetailPanel').html(summaryHtml);
+}
+
+// Global Excel export (Dashboard sheet + per POC sheets)
+function exportMasterExcel(pocMap, enrichedArr, dashboardRows) {
+    const workbook = XLSX.utils.book_new();
+    // Dashboard sheet
+    const dashSheetData = [['POC Name','Total Entries','Duplicate Count','Primary Count','1K–10K','10K–50K','50K–100K','100K–500K','500K+','1M+','Others']];
+    for(let r of dashboardRows) {
+        dashSheetData.push([r.pocName, r.total, r.duplicates, r.primary, r['1K–10K'], r['10K–50K'], r['50K–100K'], r['100K–500K'], r['500K+'], r['1M+'], (r['Below 1K']+r['Other'])]);
+    }
+    const dashSheet = XLSX.utils.aoa_to_sheet(dashSheetData);
+    XLSX.utils.book_append_sheet(workbook, dashSheet, 'DASHBOARD');
+    
+    // each POC sheet
+    for(let [pocName, pocData] of pocMap.entries()) {
+        const entries = pocData.entries;
+        const summaryRows = [
+            [`SUMMARY for ${pocName}`],[`Total Entries: ${entries.length}`],[`Duplicate Count: ${pocData.duplicateCount}`],[`Primary Count: ${pocData.primaryCount}`],
+            [`Avg Followers: ${Math.round(entries.reduce((a,b)=>a+b.followers,0)/entries.length||0)}`],[`Max Followers: ${Math.max(...entries.map(e=>e.followers),0)}`],[`Min Followers: ${Math.min(...entries.map(e=>e.followers),0)}`],[],
+            ['Profile Category Breakdown'],...Array.from(pocData.bucketCounts.entries()).map(([k,v])=>[`${k}`,v]),[]
+        ];
+        const header = [['SR No','Full Name','Age','Gender','Instagram Handle','Followers','Profile Category','Content Category','City','Email','POC Name','POC Contact','Source','Timestamp','Duplicate','Duplicate Group','Primary Flag']];
+        const dataRows = entries.map((e,idx)=>[
+            idx+1, e.fullName, e.age, e.gender, e.instagram, e.followers, e.profileCategory, e.contentCategory, e.city, e.email, e.pocName, e.pocContact, e.source, e.timestampRaw, e.isDuplicate ? 'YES' : 'NO', e.dupGroup || '', e.primaryFlag ? 'PRIMARY ⭐' : ''
+        ]);
+        const finalData = [...summaryRows, [], ...header, ...dataRows];
+        const sheet = XLSX.utils.aoa_to_sheet(finalData);
+        XLSX.utils.book_append_sheet(workbook, sheet, pocName.slice(0,31));
+    }
+    XLSX.writeFile(workbook, `Campaign_Report_${new Date().toISOString().slice(0,19)}.xlsx`);
+}
+
+// main upload handler
+$('#excelInput').on('change', function(e) {
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, {type: 'array'});
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(firstSheet, {header:1, defval:""});
+        if(!rows || rows.length < 2) { alert("Empty file"); return; }
+        const headers = rows[0];
+        const colIdx = colMapping(headers);
+        const normalized = [];
+        for(let i=1; i<rows.length; i++) {
+            const rowObj = {};
+            headers.forEach((h,idx)=> rowObj[idx]=rows[i][idx]);
+            const norm = normalizeRow(rowObj, colIdx);
+            if(norm.email && norm.pocName && norm.pocName !== '') normalized.push(norm);
+        }
+        if(normalized.length===0) { alert("No valid rows with email and POC name"); return; }
+        const { enriched, pocMap } = processData(normalized);
+        rawData = normalized;
+        updatePreview(enriched);
+        populatePocFilter(pocMap);
+        renderDashboard(pocMap);
+        renderPOCSheets(pocMap);
+        $('#exportFinalBtn').prop('disabled', false);
+        $('#filterPoc, #filterMinFollowers, #filterMaxFollowers, #filterCategory, #filterCity').on('input change', ()=>applyFiltersAndPreview());
+    };
+    reader.readAsArrayBuffer(file);
+});
+
+$('#exportFinalBtn').click(()=>{
+    if(!currentPocMap) return;
+    const dashRows = buildDashboardArray(currentPocMap);
+    exportMasterExcel(currentPocMap, currentEnriched, dashRows);
+});
+
+// initial disable export
+$(document).ready(()=>{
+    $('#exportFinalBtn').prop('disabled', true);
+});
+</script>
+</body>
+</html>
